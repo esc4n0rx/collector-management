@@ -7,10 +7,15 @@ import { CollectorManagement } from "@/components/collector-management"
 import { CollectorOperations } from "@/components/collector-operations"
 import { Reports } from "@/components/reports"
 import { Status } from "@/components/status"
+import type { Usuario } from "@/types/auth"
 
 type ActiveSection = "manage" | "operations" | "reports" | "status"
 
-export function DashboardLayout() {
+interface DashboardLayoutProps {
+  currentUser: Usuario | null
+}
+
+export function DashboardLayout({ currentUser }: DashboardLayoutProps) {
   const [activeSection, setActiveSection] = useState<ActiveSection>("status")
 
   const renderContent = () => {
@@ -32,7 +37,7 @@ export function DashboardLayout() {
     <div className="flex h-screen bg-background">
       <Sidebar activeSection={activeSection} onSectionChange={setActiveSection} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
+        <Header currentUser={currentUser} />
         <main className="flex-1 overflow-y-auto p-6">{renderContent()}</main>
       </div>
     </div>
