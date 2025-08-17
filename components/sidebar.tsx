@@ -2,11 +2,11 @@
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Package, ArrowRightLeft, BarChart3, Activity } from "lucide-react"
+import { Package, ArrowRightLeft, BarChart3, Activity, Users } from "lucide-react"
 
 interface SidebarProps {
   activeSection: string
-  onSectionChange: (section: "manage" | "operations" | "reports" | "status") => void
+  onSectionChange: (section: "manage" | "operations" | "reports" | "status" | "users") => void
 }
 
 const menuItems = [
@@ -24,6 +24,11 @@ const menuItems = [
     id: "operations" as const,
     label: "Liberar / Devolver",
     icon: ArrowRightLeft,
+  },
+  {
+    id: "users" as const,
+    label: "Usuários",
+    icon: Users,
   },
   {
     id: "reports" as const,

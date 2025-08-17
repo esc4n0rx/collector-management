@@ -48,3 +48,30 @@ export async function verificarMatriculaExiste(matricula: number): Promise<{ exi
     return { existe: false, error: 'Erro interno do servidor' }
   }
 }
+
+/**
+ * Gera uma nova matrícula única para terceirizados
+ */
+export async function gerarMatriculaUnica(): Promise<{ matricula: number | null; error: string | null }> {
+  try {
+    // Buscar a maior matrícula existente
+    const { data, error } = await supabase
+      .from('matriculas')
+      .select('matricula')
+      .order('matricula', { ascending: false })
+      .limit(1)
+
+    if (error) {
+      console.error('Erro ao buscar maior matrícula:', error)
+      return { matricula: null, error: error.message }
+    }
+
+    // Se não há registros, começar com 90000 (faixa para terceirizados)
+    const proximaMatricula = data && data.length > 0 ? data[0].matricula + 1 : 90000
+
+    return { matricula: proximaMatricula, error: null }
+  } catch (error) {
+    console.error('Erro na geração de matrícula:', error)
+    return { matricula: null, error: 'Erro interno do servidor' }
+  }
+}

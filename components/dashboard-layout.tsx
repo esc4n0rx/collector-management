@@ -7,9 +7,10 @@ import { CollectorManagement } from "@/components/collector-management"
 import { CollectorOperations } from "@/components/collector-operations"
 import { Reports } from "@/components/reports"
 import { Status } from "@/components/status"
+import { UserManagement } from "@/components/user-management"
 import type { Usuario } from "@/types/auth"
 
-type ActiveSection = "manage" | "operations" | "reports" | "status"
+type ActiveSection = "manage" | "operations" | "reports" | "status" | "users"
 
 interface DashboardLayoutProps {
   currentUser: Usuario | null
@@ -28,6 +29,8 @@ export function DashboardLayout({ currentUser }: DashboardLayoutProps) {
         return <Reports />
       case "status":
         return <Status />
+      case "users":
+        return <UserManagement />
       default:
         return <Status />
     }
