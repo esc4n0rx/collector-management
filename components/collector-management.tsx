@@ -1,14 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Edit, Trash2 } from "lucide-react"
+import { Plus, Edit, Trash2, Loader2 } from "lucide-react"
 import { AddCollectorModal } from "@/components/add-collector-modal"
 import { EditCollectorModal } from "@/components/edit-collector-modal"
-import { mockCollectors, type Collector } from "@/lib/mock-data"
+import { buscarColetores, removerColetor } from "@/lib/supabase-collectors"
+import type { ColetorCompleto } from "@/types/supabase"
+import { toast } from "sonner"
 
 const statusLabels = {
   "em-operacao": "Em Operação",
@@ -23,32 +25,67 @@ const statusColors = {
 }
 
 export function CollectorManagement() {
-  const [collectors, setCollectors] = useState<Collector[]>(mockCollectors)
+  const [collectors, setCollectors] = useState<ColetorCompleto[]>([])
+  const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [editingCollector, setEditingCollector] = useState<Collector | null>(null)
+  const [editingCollector, setEditingCollector] = useState<ColetorCompleto | null>(null)
 
-  const handleAddCollector = (newCollector: Omit<Collector, "lastUpdated">) => {
-    const collector: Collector = {
-      ...newCollector,
-      lastUpdated: new Date().toISOString(),
+  const carregarColetores = async () => {
+    setLoading(true)
+    const { data, error } = await buscarColetores()
+    
+    if (error) {
+      toast.error("Erro ao carregar coletores", {
+        description: error
+      })
+    } else if (data) {
+      setCollectors(data)
     }
-    setCollectors([...collectors, collector])
+    
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    carregarColetores()
+  }, [])
+
+  const handleAddCollector = () => {
     setShowAddModal(false)
+    carregarColetores()
+    toast.success("Coletor adicionado com sucesso!")
   }
 
-  const handleEditCollector = (updatedCollector: Collector) => {
-    setCollectors(
-      collectors.map((c) =>
-        c.id === updatedCollector.id ? { ...updatedCollector, lastUpdated: new Date().toISOString() } : c,
-      ),
-    )
+  const handleEditCollector = () => {
     setEditingCollector(null)
+    carregarColetores()
+    toast.success("Coletor atualizado com sucesso!")
   }
 
-  const handleDeleteCollector = (id: string) => {
-    if (confirm("Tem certeza que deseja remover este coletor?")) {
-      setCollectors(collectors.filter((c) => c.id !== id))
+  const handleDeleteCollector = async (coletor: ColetorCompleto) => {
+    if (!confirm(`Tem certeza que deseja remover o coletor #${coletor.numero_coletor}?`)) {
+      return
     }
+
+    const { success, error } = await removerColetor(coletor.id)
+    
+    if (success) {
+      toast.success("Coletor removido com sucesso!")
+      carregarColetores()
+    } else {
+      toast.error("Erro ao remover coletor", {
+        description: error || "Erro desconhecido"
+      })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -73,7 +110,10 @@ export function CollectorManagement() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>ID</TableHead>
+                <TableHead>Número</TableHead>
+                <TableHead>Item</TableHead>
+                <TableHead>Série</TableHead>
+                <TableHead>Código</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Usuário Atual</TableHead>
                 <TableHead>Última Atualização</TableHead>
@@ -83,19 +123,25 @@ export function CollectorManagement() {
             <TableBody>
               {collectors.map((collector) => (
                 <TableRow key={collector.id}>
-                  <TableCell className="font-medium">#{collector.id}</TableCell>
+                  <TableCell className="font-medium">#{collector.numero_coletor}</TableCell>
+                  <TableCell className="font-mono text-sm">{collector.numero_item}</TableCell>
+                  <TableCell className="font-mono text-sm">{collector.numero_serie}</TableCell>
+                  <TableCell className="font-mono text-sm">{collector.codigo}</TableCell>
                   <TableCell>
                     <Badge className={statusColors[collector.status]}>{statusLabels[collector.status]}</Badge>
                   </TableCell>
                   <TableCell>
-                    {collector.currentUser ? (
-                      <span className="text-sm">Matrícula {collector.currentUser}</span>
+                    {collector.usuario ? (
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{collector.usuario.nome}</span>
+                        <span className="text-xs text-muted-foreground">Mat. {collector.usuario.matricula}</span>
+                      </div>
                     ) : (
                       <span className="text-muted-foreground text-sm">-</span>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {new Date(collector.lastUpdated).toLocaleString("pt-BR")}
+                    {new Date(collector.updated_at).toLocaleString("pt-BR")}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -105,7 +151,7 @@ export function CollectorManagement() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDeleteCollector(collector.id)}
+                        onClick={() => handleDeleteCollector(collector)}
                         className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -122,8 +168,7 @@ export function CollectorManagement() {
       <AddCollectorModal
         open={showAddModal}
         onOpenChange={setShowAddModal}
-        onAdd={handleAddCollector}
-        existingIds={collectors.map((c) => c.id)}
+        onSuccess={handleAddCollector}
       />
 
       {editingCollector && (
@@ -131,8 +176,7 @@ export function CollectorManagement() {
           open={!!editingCollector}
           onOpenChange={() => setEditingCollector(null)}
           collector={editingCollector}
-          onEdit={handleEditCollector}
-          existingIds={collectors.map((c) => c.id).filter((id) => id !== editingCollector.id)}
+          onSuccess={handleEditCollector}
         />
       )}
     </div>

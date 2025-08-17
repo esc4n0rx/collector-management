@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,10 +11,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle, XCircle, ArrowRight, ArrowLeft, Loader2 } from "lucide-react"
-import { mockCollectors, type Collector } from "@/lib/mock-data"
+import { buscarColetores, liberarColetor, devolverColetores } from "@/lib/supabase-collectors"
+import { verificarMatriculaExiste, buscarUsuarioPorMatricula } from "@/lib/supabase-users"
+import { SuccessModal } from "@/components/success-modal"
+import type { ColetorCompleto } from "@/types/supabase"
+import { toast } from "sonner"
 
 export function CollectorOperations() {
-  const [collectors, setCollectors] = useState<Collector[]>(mockCollectors)
+  const [collectors, setCollectors] = useState<ColetorCompleto[]>([])
+  const [loadingCollectors, setLoadingCollectors] = useState(true)
 
   // Release collector state
   const [releaseCollectorId, setReleaseCollectorId] = useState("")
@@ -27,12 +32,34 @@ export function CollectorOperations() {
   const [returnMessage, setReturnMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [isReturning, setIsReturning] = useState(false)
 
+  // Success modals
+  const [showReleaseSuccess, setShowReleaseSuccess] = useState(false)
+  const [showReturnSuccess, setShowReturnSuccess] = useState(false)
+  const [successData, setSuccessData] = useState<any>(null)
+
+  const carregarColetores = async () => {
+    setLoadingCollectors(true)
+    const { data, error } = await buscarColetores()
+    
+    if (error) {
+      toast.error("Erro ao carregar coletores", {
+        description: error
+      })
+    } else if (data) {
+      setCollectors(data)
+    }
+    
+    setLoadingCollectors(false)
+  }
+
+  useEffect(() => {
+    carregarColetores()
+  }, [])
+
   const handleReleaseCollector = async (e: React.FormEvent) => {
     e.preventDefault()
     setReleaseMessage(null)
     setIsReleasing(true)
-
-    await new Promise((resolve) => setTimeout(resolve, 1000))
 
     if (!releaseCollectorId.trim() || !releaseUserId.trim()) {
       setReleaseMessage({ type: "error", text: "Todos os campos são obrigatórios" })
@@ -40,41 +67,69 @@ export function CollectorOperations() {
       return
     }
 
-    const collector = collectors.find((c) => c.id === releaseCollectorId.trim())
+    const numeroColetorInt = parseInt(releaseCollectorId.trim(), 10)
+    const matriculaInt = parseInt(releaseUserId.trim(), 10)
 
-    if (!collector) {
-      setReleaseMessage({ type: "error", text: "Coletor não encontrado" })
+    if (isNaN(numeroColetorInt) || isNaN(matriculaInt)) {
+      setReleaseMessage({ type: "error", text: "Número do coletor e matrícula devem ser números válidos" })
       setIsReleasing(false)
       return
     }
 
-    if (collector.status !== "disponivel") {
-      setReleaseMessage({ type: "error", text: "Coletor não está disponível para liberação" })
+    try {
+      // Verificar se a matrícula existe e buscar dados do usuário
+      const { existe, error: matriculaError } = await verificarMatriculaExiste(matriculaInt)
+      
+      if (matriculaError) {
+        setReleaseMessage({ type: "error", text: matriculaError })
+        setIsReleasing(false)
+        return
+      }
+
+      if (!existe) {
+        setReleaseMessage({ type: "error", text: "Matrícula não encontrada no sistema" })
+        setIsReleasing(false)
+        return
+      }
+
+      // Buscar dados completos do usuário
+      const { data: usuarioData } = await buscarUsuarioPorMatricula(matriculaInt)
+
+      // Liberar coletor
+      const { success, error } = await liberarColetor(numeroColetorInt, matriculaInt)
+
+      if (success) {
+        // Limpar formulário
+        setReleaseCollectorId("")
+        setReleaseUserId("")
+        setReleaseMessage(null)
+        
+        // Recarregar dados
+        carregarColetores()
+        
+        // Preparar dados para o modal de sucesso
+        setSuccessData({
+          coletor: numeroColetorInt,
+          usuario: {
+            matricula: matriculaInt,
+            nome: usuarioData?.nome
+          }
+        })
+        
+        // Mostrar modal de sucesso
+        setShowReleaseSuccess(true)
+        
+        // Toast como backup
+        toast.success("Coletor liberado com sucesso!")
+      } else {
+        setReleaseMessage({ type: "error", text: error || "Erro ao liberar coletor" })
+      }
+    } catch (error) {
+      console.error("Erro na liberação:", error)
+      setReleaseMessage({ type: "error", text: "Erro interno do servidor" })
+    } finally {
       setIsReleasing(false)
-      return
     }
-
-    // Update collector status
-    setCollectors((prev) =>
-      prev.map((c) =>
-        c.id === releaseCollectorId.trim()
-          ? {
-              ...c,
-              status: "em-operacao" as const,
-              currentUser: releaseUserId.trim(),
-              lastUpdated: new Date().toISOString(),
-            }
-          : c,
-      ),
-    )
-
-    setReleaseMessage({
-      type: "success",
-      text: `Coletor #${releaseCollectorId} liberado para matrícula ${releaseUserId}`,
-    })
-    setReleaseCollectorId("")
-    setReleaseUserId("")
-    setIsReleasing(false)
   }
 
   const handleReturnCollector = async (e: React.FormEvent) => {
@@ -82,39 +137,71 @@ export function CollectorOperations() {
     setReturnMessage(null)
     setIsReturning(true)
 
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
     if (!returnUserId.trim()) {
       setReturnMessage({ type: "error", text: "Matrícula do usuário é obrigatória" })
       setIsReturning(false)
       return
     }
 
-    const userCollectors = collectors.filter((c) => c.currentUser === returnUserId.trim() && c.status === "em-operacao")
+    const matriculaInt = parseInt(returnUserId.trim(), 10)
 
-    if (userCollectors.length === 0) {
-      setReturnMessage({ type: "error", text: "Nenhum coletor encontrado para esta matrícula" })
+    if (isNaN(matriculaInt)) {
+      setReturnMessage({ type: "error", text: "Matrícula deve ser um número válido" })
       setIsReturning(false)
       return
     }
 
-    // Return all collectors for this user
-    setCollectors((prev) =>
-      prev.map((c) =>
-        c.currentUser === returnUserId.trim() && c.status === "em-operacao"
-          ? { ...c, status: "disponivel" as const, currentUser: undefined, lastUpdated: new Date().toISOString() }
-          : c,
-      ),
-    )
+    try {
+      // Buscar dados do usuário antes de devolver
+      const { data: usuarioData } = await buscarUsuarioPorMatricula(matriculaInt)
 
-    const collectorIds = userCollectors.map((c) => `#${c.id}`).join(", ")
-    setReturnMessage({ type: "success", text: `Coletores ${collectorIds} devolvidos com sucesso` })
-    setReturnUserId("")
-    setIsReturning(false)
+      const { success, error, coletoresDevolvidos } = await devolverColetores(matriculaInt)
+
+      if (success) {
+        // Limpar formulário
+        setReturnUserId("")
+        setReturnMessage(null)
+        
+        // Recarregar dados
+        carregarColetores()
+        
+        // Preparar dados para o modal de sucesso
+        setSuccessData({
+          coletores: coletoresDevolvidos,
+          usuario: {
+            matricula: matriculaInt,
+            nome: usuarioData?.nome
+          }
+        })
+        
+        // Mostrar modal de sucesso
+        setShowReturnSuccess(true)
+        
+        // Toast como backup
+        toast.success("Coletores devolvidos com sucesso!")
+      } else {
+        setReturnMessage({ type: "error", text: error || "Erro ao devolver coletores" })
+      }
+    } catch (error) {
+      console.error("Erro na devolução:", error)
+      setReturnMessage({ type: "error", text: "Erro interno do servidor" })
+    } finally {
+      setIsReturning(false)
+    }
   }
 
   const availableCollectors = collectors.filter((c) => c.status === "disponivel")
   const collectorsInUse = collectors.filter((c) => c.status === "em-operacao")
+
+  if (loadingCollectors) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -151,7 +238,8 @@ export function CollectorOperations() {
                     <Label htmlFor="release-collector-id">Número do Coletor</Label>
                     <Input
                       id="release-collector-id"
-                      placeholder="Ex: 001, 002, 003..."
+                      type="number"
+                      placeholder="Ex: 1, 2, 3..."
                       value={releaseCollectorId}
                       onChange={(e) => setReleaseCollectorId(e.target.value)}
                       disabled={isReleasing}
@@ -161,6 +249,7 @@ export function CollectorOperations() {
                     <Label htmlFor="release-user-id">Matrícula do Usuário</Label>
                     <Input
                       id="release-user-id"
+                      type="number"
                       placeholder="Digite a matrícula"
                       value={releaseUserId}
                       onChange={(e) => setReleaseUserId(e.target.value)}
@@ -210,9 +299,12 @@ export function CollectorOperations() {
                       <div
                         key={collector.id}
                         className="flex items-center justify-between p-3 bg-muted rounded-lg cursor-pointer hover:bg-muted/80 transition-all duration-200 hover:scale-[1.02]"
-                        onClick={() => setReleaseCollectorId(collector.id)}
+                        onClick={() => setReleaseCollectorId(collector.numero_coletor.toString())}
                       >
-                        <span className="font-medium">#{collector.id}</span>
+                        <div className="flex flex-col">
+                          <span className="font-medium">#{collector.numero_coletor}</span>
+                          <span className="text-xs text-muted-foreground">{collector.numero_item}</span>
+                        </div>
                         <Badge className="bg-green-500 text-white">Disponível</Badge>
                       </div>
                     ))
@@ -241,6 +333,7 @@ export function CollectorOperations() {
                     <Label htmlFor="return-user-id">Matrícula do Usuário</Label>
                     <Input
                       id="return-user-id"
+                      type="number"
                       placeholder="Digite a matrícula"
                       value={returnUserId}
                       onChange={(e) => setReturnUserId(e.target.value)}
@@ -290,11 +383,13 @@ export function CollectorOperations() {
                       <div
                         key={collector.id}
                         className="flex items-center justify-between p-3 bg-muted rounded-lg cursor-pointer hover:bg-muted/80 transition-all duration-200 hover:scale-[1.02]"
-                        onClick={() => setReturnUserId(collector.currentUser || "")}
+                        onClick={() => setReturnUserId(collector.matricula_usuario?.toString() || "")}
                       >
                         <div className="flex flex-col">
-                          <span className="font-medium">#{collector.id}</span>
-                          <span className="text-xs text-muted-foreground">Matrícula {collector.currentUser}</span>
+                          <span className="font-medium">#{collector.numero_coletor}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {collector.usuario?.nome} - Mat. {collector.usuario?.matricula}
+                          </span>
                         </div>
                         <Badge className="bg-accent text-accent-foreground">Em Operação</Badge>
                       </div>
@@ -308,6 +403,21 @@ export function CollectorOperations() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Modais de Sucesso */}
+      <SuccessModal
+        open={showReleaseSuccess}
+        onOpenChange={setShowReleaseSuccess}
+        type="liberar"
+        data={successData || { usuario: { matricula: 0 } }}
+      />
+
+      <SuccessModal
+        open={showReturnSuccess}
+        onOpenChange={setShowReturnSuccess}
+        type="devolver"
+        data={successData || { usuario: { matricula: 0 } }}
+      />
     </div>
   )
 }

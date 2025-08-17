@@ -15,53 +15,87 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import type { Collector } from "@/lib/mock-data"
+import { Loader2 } from "lucide-react"
+import { atualizarColetor } from "@/lib/supabase-collectors"
+import type { ColetorCompleto, ColetorStatus } from "@/types/supabase"
+import { toast } from "sonner"
 
 interface EditCollectorModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  collector: Collector
-  onEdit: (collector: Collector) => void
-  existingIds: string[]
+  collector: ColetorCompleto
+  onSuccess: () => void
 }
 
-export function EditCollectorModal({ open, onOpenChange, collector, onEdit, existingIds }: EditCollectorModalProps) {
-  const [id, setId] = useState(collector.id)
-  const [status, setStatus] = useState<Collector["status"]>(collector.status)
-  const [currentUser, setCurrentUser] = useState(collector.currentUser || "")
+export function EditCollectorModal({ open, onOpenChange, collector, onSuccess }: EditCollectorModalProps) {
+  const [numeroColetor, setNumeroColetor] = useState(collector.numero_coletor.toString())
+  const [numeroItem, setNumeroItem] = useState(collector.numero_item)
+  const [numeroSerie, setNumeroSerie] = useState(collector.numero_serie)
+  const [codigo, setCodigo] = useState(collector.codigo)
+  const [status, setStatus] = useState<ColetorStatus>(collector.status)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
   useEffect(() => {
-    setId(collector.id)
+    setNumeroColetor(collector.numero_coletor.toString())
+    setNumeroItem(collector.numero_item)
+    setNumeroSerie(collector.numero_serie)
+    setCodigo(collector.codigo)
     setStatus(collector.status)
-    setCurrentUser(collector.currentUser || "")
     setError("")
   }, [collector])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setLoading(true)
 
-    if (!id.trim()) {
-      setError("ID do coletor é obrigatório")
+    // Validações
+    if (!numeroColetor.trim() || !numeroItem.trim() || !numeroSerie.trim() || !codigo.trim()) {
+      setError("Todos os campos são obrigatórios")
+      setLoading(false)
       return
     }
 
-    if (id.trim() !== collector.id && existingIds.includes(id.trim())) {
-      setError("Este ID já existe")
+    const numeroColetorInt = parseInt(numeroColetor.trim(), 10)
+    if (isNaN(numeroColetorInt)) {
+      setError("Número do coletor deve ser um número válido")
+      setLoading(false)
       return
     }
 
-    onEdit({
-      ...collector,
-      id: id.trim(),
-      status,
-      currentUser: status === "em-operacao" && currentUser ? currentUser : undefined,
-    })
+    try {
+      const updateData: any = {
+        numero_coletor: numeroColetorInt,
+        numero_item: numeroItem.trim(),
+        numero_serie: numeroSerie.trim(),
+        codigo: codigo.trim(),
+        status
+      }
+
+      // Se o status mudou para não operação, remover usuário
+      if (status !== 'em-operacao' && collector.status === 'em-operacao') {
+        updateData.matricula_usuario = null
+      }
+
+      const { data, error: updateError } = await atualizarColetor(collector.id, updateData)
+
+      if (updateError) {
+        setError(updateError)
+      } else {
+        setError("")
+        onSuccess()
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar coletor:", error)
+      setError("Erro interno do servidor")
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleOpenChange = (newOpen: boolean) => {
-    if (!newOpen) {
+    if (!newOpen && !loading) {
       setError("")
     }
     onOpenChange(newOpen)
@@ -72,23 +106,51 @@ export function EditCollectorModal({ open, onOpenChange, collector, onEdit, exis
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Editar Coletor</DialogTitle>
-          <DialogDescription>Modifique as informações do coletor #{collector.id}.</DialogDescription>
+          <DialogDescription>Modifique as informações do coletor #{collector.numero_coletor}.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-collector-id">ID do Coletor</Label>
+              <Label htmlFor="edit-numero-coletor">Número do Coletor</Label>
               <Input
-                id="edit-collector-id"
-                value={id}
-                onChange={(e) => setId(e.target.value)}
+                id="edit-numero-coletor"
+                type="number"
+                value={numeroColetor}
+                onChange={(e) => setNumeroColetor(e.target.value)}
+                disabled={loading}
                 className={error ? "border-destructive" : ""}
               />
-              {error && <p className="text-sm text-destructive">{error}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-numero-item">Número do Item</Label>
+              <Input
+                id="edit-numero-item"
+                value={numeroItem}
+                onChange={(e) => setNumeroItem(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-numero-serie">Número de Série</Label>
+              <Input
+                id="edit-numero-serie"
+                value={numeroSerie}
+                onChange={(e) => setNumeroSerie(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-codigo">Código</Label>
+              <Input
+                id="edit-codigo"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                disabled={loading}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-collector-status">Status</Label>
-              <Select value={status} onValueChange={(value: Collector["status"]) => setStatus(value)}>
+              <Select value={status} onValueChange={(value: ColetorStatus) => setStatus(value)} disabled={loading}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -99,23 +161,29 @@ export function EditCollectorModal({ open, onOpenChange, collector, onEdit, exis
                 </SelectContent>
               </Select>
             </div>
-            {status === "em-operacao" && (
-              <div className="space-y-2">
-                <Label htmlFor="edit-current-user">Usuário Atual (Matrícula)</Label>
-                <Input
-                  id="edit-current-user"
-                  placeholder="Digite a matrícula do usuário"
-                  value={currentUser}
-                  onChange={(e) => setCurrentUser(e.target.value)}
-                />
+            {status !== 'em-operacao' && collector.status === 'em-operacao' && collector.usuario && (
+              <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  ⚠️ Alterar o status removerá o vínculo com o usuário {collector.usuario.nome} (Mat. {collector.usuario.matricula})
+                </p>
               </div>
             )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={loading}>
               Cancelar
             </Button>
-            <Button type="submit">Salvar Alterações</Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                "Salvar Alterações"
+              )}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

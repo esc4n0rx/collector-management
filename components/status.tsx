@@ -4,12 +4,16 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Package, CheckCircle, Wrench, Clock, Users, Activity } from "lucide-react"
-import { mockCollectors, mockHistory } from "@/lib/mock-data"
+import { Package, CheckCircle, Wrench, Clock, Users, Activity, Loader2 } from "lucide-react"
+import { buscarColetores, buscarHistoricoOperacoes } from "@/lib/supabase-collectors"
+import type { ColetorCompleto, HistoricoOperacao } from "@/types/supabase"
+import { toast } from "sonner"
 
 export function Status() {
-  const [collectors] = useState(mockCollectors)
+  const [collectors, setCollectors] = useState<ColetorCompleto[]>([])
+  const [historico, setHistorico] = useState<HistoricoOperacao[]>([])
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -19,16 +23,54 @@ export function Status() {
     return () => clearInterval(timer)
   }, [])
 
+  const carregarDados = async () => {
+    setLoading(true)
+    
+    // Carregar coletores
+    const { data: coletoresData, error: coletoresError } = await buscarColetores()
+    if (coletoresError) {
+      toast.error("Erro ao carregar coletores", {
+        description: coletoresError
+      })
+    } else if (coletoresData) {
+      setCollectors(coletoresData)
+    }
+
+    // Carregar histórico
+    const { data: historicoData, error: historicoError } = await buscarHistoricoOperacoes(10)
+    if (historicoError) {
+      console.error("Erro ao carregar histórico:", historicoError)
+    } else if (historicoData) {
+      setHistorico(historicoData)
+    }
+    
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    carregarDados()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
+  }
+
   const collectorsInOperation = collectors.filter((c) => c.status === "em-operacao")
   const collectorsAvailable = collectors.filter((c) => c.status === "disponivel")
   const collectorsInMaintenance = collectors.filter((c) => c.status === "manutencao")
 
   const totalCollectors = collectors.length
-  const operationPercentage = (collectorsInOperation.length / totalCollectors) * 100
-  const availablePercentage = (collectorsAvailable.length / totalCollectors) * 100
-  const maintenancePercentage = (collectorsInMaintenance.length / totalCollectors) * 100
+  const operationPercentage = totalCollectors > 0 ? (collectorsInOperation.length / totalCollectors) * 100 : 0
+  const availablePercentage = totalCollectors > 0 ? (collectorsAvailable.length / totalCollectors) * 100 : 0
+  const maintenancePercentage = totalCollectors > 0 ? (collectorsInMaintenance.length / totalCollectors) * 100 : 0
 
-  const activeUsers = new Set(collectorsInOperation.map((c) => c.currentUser).filter(Boolean))
+  const activeUsers = new Set(collectorsInOperation.map((c) => c.usuario?.matricula).filter(Boolean))
 
   const statusData = [
     {
@@ -60,42 +102,30 @@ export function Status() {
     },
   ]
 
-  const recentActivity = [
-    {
-      id: "1",
-      message: `Coletor #${collectorsInOperation[0]?.id || "001"} liberado`,
-      detail: `Matrícula ${collectorsInOperation[0]?.currentUser || "12345"} - há 5 minutos`,
-      color: "bg-accent",
-      time: "5 min",
-    },
-    {
-      id: "2",
-      message: "Coletor #007 devolvido",
-      detail: "Matrícula 67890 - há 12 minutos",
-      color: "bg-green-500",
-      time: "12 min",
-    },
-    {
-      id: "3",
-      message: `Coletor #${collectorsInMaintenance[0]?.id || "015"} em manutenção`,
-      detail: "Reportado há 1 hora",
-      color: "bg-yellow-500",
-      time: "1h",
-    },
-    {
-      id: "4",
-      message: "Sistema atualizado",
-      detail: "Backup automático realizado",
-      color: "bg-blue-500",
-      time: "2h",
-    },
-  ]
+  const recentActivity = historico.slice(0, 4).map((item, index) => ({
+    id: item.id.toString(),
+    message: `Coletor #${item.numero_coletor} ${item.acao === 'liberar' ? 'liberado' : 'devolvido'}`,
+    detail: `${item.usuario?.nome || `Mat. ${item.matricula_usuario}`} - ${new Date(item.timestamp).toLocaleString('pt-BR')}`,
+    color: item.acao === 'liberar' ? "bg-accent" : "bg-green-500",
+    time: getTimeAgo(item.timestamp),
+  }))
+
+  function getTimeAgo(timestamp: string): string {
+    const now = new Date()
+    const time = new Date(timestamp)
+    const diffInMinutes = Math.floor((now.getTime() - time.getTime()) / (1000 * 60))
+    
+    if (diffInMinutes < 1) return 'agora'
+    if (diffInMinutes < 60) return `${diffInMinutes}min`
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h`
+    return `${Math.floor(diffInMinutes / 1440)}d`
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-montserrat font-black text-foreground">Status do Sistema</h1>
+        <h1 className="text-3xl font-montserrat font-black text-foreground">Status do Sistema</h1>
           <p className="text-muted-foreground mt-2">Visão geral dos coletores no centro de distribuição</p>
         </div>
         <div className="text-right">
@@ -169,7 +199,11 @@ export function Status() {
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockHistory.length + 5}</div>
+            <div className="text-2xl font-bold">{historico.filter(h => {
+              const hoje = new Date()
+              const dataHistorico = new Date(h.timestamp)
+              return dataHistorico.toDateString() === hoje.toDateString()
+            }).length}</div>
             <p className="text-xs text-muted-foreground">Liberações e devoluções</p>
           </CardContent>
         </Card>
@@ -183,16 +217,20 @@ export function Status() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentActivity.map((activity) => (
-                <div key={activity.id} className="flex items-center gap-4 p-3 bg-muted rounded-lg">
-                  <div className={`w-2 h-2 ${activity.color} rounded-full flex-shrink-0`}></div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{activity.message}</p>
-                    <p className="text-xs text-muted-foreground truncate">{activity.detail}</p>
+              {recentActivity.length > 0 ? (
+                recentActivity.map((activity) => (
+                  <div key={activity.id} className="flex items-center gap-4 p-3 bg-muted rounded-lg">
+                    <div className={`w-2 h-2 ${activity.color} rounded-full flex-shrink-0`}></div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{activity.message}</p>
+                      <p className="text-xs text-muted-foreground truncate">{activity.detail}</p>
+                    </div>
+                    <div className="text-xs text-muted-foreground flex-shrink-0">{activity.time}</div>
                   </div>
-                  <div className="text-xs text-muted-foreground flex-shrink-0">{activity.time}</div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-muted-foreground text-sm text-center py-4">Nenhuma atividade recente</p>
+              )}
             </div>
           </CardContent>
         </Card>
